@@ -24,9 +24,94 @@ module.exports = function(RED) {
     var jsonParser = express.json();
     var urlencParser = express.urlencoded();
     var request = require('request');
+    var url = require('url');
 
+
+    var map = new Object();
+    var my_url= 'http%3A%2F%2Flocalhost%3A1880%2Fa';
+
+
+    //get expiration of the token
+    function getExpirationFromToken(token){
+   	var split = token.split(".");
+	for(var i=0; i< split.length; i++){
+        	var buf = new Buffer(split[i], 'base64');
+	        var object = JSON.parse(buf.toString());
+        	if(object.exp != null && object.exp != undefined){
+                     return object.exp;
+	        }
+    	}
+    }
+
+    //improve this...
+    function getValueCookie(msg,label){
+        console.log('second stuff:'+msg);
+	var str = msg.req.get('Cookie');
+	if(str != undefined && str != null){
+	  var res = str.split(";");
+          for(var i =0; i<res.length; i++){
+		var cookies2 = res[i].split('=');
+		for(var j=0; j<cookies2.length; j++){
+			if(cookies2[j] == label){
+				return cookies2[j+1];
+			}
+		}
+	  }
+	}
+    }
+  
+   function getTokenByCode(cookie,code, node, msg, callback){
+		if(map[cookie]!= null && map[cookie] != undefined && map[cookie]['status'] == 0){
+			request.post(
+			   node.url+'/oauth/token',
+			       { form: { 
+					code: code, 
+				  	redirect_uri: my_url, 
+					grant_type: 'authorization_code', 
+					client_id: 'someid', 
+					client_secret: 'some_secret'
+				    },
+				 headers: {
+			          'Authorization': 'Basic dGVzdDM6cGFzcw==',
+			         }				 
+			       },
+			       function (error, response, body) {
+			        if (!error && response.statusCode == 200) {
+				    callback(JSON.parse(body)['access_token']);
+			        }
+				else{
+					console.log('problem with auth. Message: '+response+' body: '+body);
+					bounce(cookie,msg,node);
+				}
+			    }
+			);			
+		}
+		else{			
+			bounce(cookie,msg,node);
+		}
+		
+   }
+   function authenticated(cookie){
+	if( map[cookie]!= null && map[cookie] != undefined && map[cookie]['status'] == 1){
+		return 1;
+	}
+	return 0;
+   }
+
+   // TODO fix configuration of my_url?? clarify with others, how this work???
+
+    function bounce(cookie,msg, node){
+      map[cookie] = {status: 0};
+      msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+my_url+'&scope=&state=&response_type=code&client_id=test3');
+    }
+   
+    function keepGoing(node, msg,cookie){
+      msg.payload = map[cookie]['token'];
+      node.send(msg);
+    }
 
     function LowerCaseNode(config) {
+
         RED.nodes.createNode(this,config);
         var node = this;
 	console.log("config: "+JSON.stringify(config));
@@ -34,49 +119,44 @@ module.exports = function(RED) {
 	console.log("using idm:"+this.url);
 
          this.on('input', function(msg) {
-	    this.log(msg.res);
-	   //};
-	    // check for bearer
-	    if(msg.req.get('Authorization')==undefined)
-	    {
-	      	//msg.res.redirect('http://www.google.com');
-		msg.res.status(401);
-		msg.res.send("Please provide an Authorization header including the format \"Bearer TOKEN\" ");
+            var cookie = getValueCookie(msg,'user_cookie_id');
+	    if(cookie !=null && cookie != undefined && authenticated(cookie)){
+		 keepGoing(node, msg,cookie);
 	    }
-	    else{
+	    else if(cookie != null && cookie != undefined){
+		//cookie set.. maybe it comes with code from IDM?
+		var code = msg.req.query.code;
+            	if(code != undefined && code != null){
+			  getTokenByCode(cookie,code, node, msg, function(token){
+				if(token != undefined && token !=null){
+					map[cookie] = {status:1, token: token}; // here he is authenticated
+					keepGoing(node, msg, cookie);
+				}
+				else{
 
-		var options = {
-	    		url: this.url+'/idm/user/info/',
-	    		headers: {
-	        		'Authorization': msg.req.get('Authorization') 				}		
-		};
-   		
-		request.get(options,
-    	    			function (error, response, body) {
- 	       			  if (!error) {
-					if(response.statusCode ==200)            						{
-					 node.log("user_info:"+JSON.stringify(body));
-					 console.log(body)
-					 msg.user_attributes = body;
-				         node.send(msg);
-				 	}
-					else{
-					 msg.res.status(response.statusCode)
-					 {
-					  msg.res.send(body);
-					 }
-					}	
-        		  	  }
-    				}
-		         );
-	    }
-	    //msg.res.send("done");
-            //msg.payload = msg.payload.toLowerCase();
-            //node.send(msg);
+					bounce(cookie,msg,node);
+				}
+		        	console.log('code'+msg.req.query.code);
+		   	 });
+            	}else{
+			//has a cookie, but he doesn't bring a code?? send it back!
+			bounce(cookie,msg,node);
+           	}
+	    }else{
+	 	// no cookie, so set one and send him to IDM   
+		var cookie = Math.floor((Math.random()*1000000000 ) + 1);
+		console.log('map with'+JSON.stringify(map));
+		msg.res.setHeader( 'Set-Cookie', 'user_cookie_id='+cookie );
+		bounce(cookie,msg,node);
+
+	        //msg.res.send('hi');
+                //node.send(msg);
+	   }
         });
     }
     RED.nodes.registerType("compose-auth",LowerCaseNode);
 }
+
 
 
 
