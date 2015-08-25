@@ -91,6 +91,26 @@ module.exports = function(RED) {
 		}
 		
    }
+
+   function  getAttributesByToken(map,cookie, node, msg,token){
+	var options = {
+                        url: node.url+'/idm/user/info/',
+                        headers: {'Authorization': "bearer "+token}                               
+        };	
+	request.get(options,
+                        function (error, response, body) {
+                                  if (!error&&response.statusCode ==200) {
+                                          map[cookie]['attributes'] = JSON.parse(body);
+                                          //map[cookie]['timestamp'] = body['lastModified'];
+                                          keepGoing(node, msg, cookie);
+                                  }
+                                  else{
+                                        bounce(cookie,msg,node);
+                                  }
+			}
+        );
+   }
+
    function authenticated(cookie){
 	if( map[cookie]!= null && map[cookie] != undefined && map[cookie]['status'] == 1){
 		return 1;
@@ -107,8 +127,14 @@ module.exports = function(RED) {
    
     function keepGoing(node, msg,cookie){
       msg.payload = map[cookie]['token'];
-      node.idm = {"attributes":{"id":"asdf","groups":["1","2"]},  "token": map[cookie]['token']};
+      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified']};
+      console.log("idm info:"+JSON.stringify(node.idm));
+
       node.send(msg);
+    }
+    // verify that token and user actually match... TODO
+    function userMatches(idmInfo, callback){
+	callback();
     }
 
     function LowerCaseNode(config) {
@@ -120,6 +146,15 @@ module.exports = function(RED) {
 	console.log("using idm:"+this.url);
 
          this.on('input', function(msg) {
+	    if(node.idm != undefined){
+		
+		userMatches(node.idm, function(map,msg,node){
+		var cookie = Math.floor((Math.random()*1000000000 ) + 1);		
+		map[cookie] = node.idm;		
+ 		keepGoing(node,msg,cookie);
+              });
+
+            }
             var cookie = getValueCookie(msg,'user_cookie_id');
 	    if(cookie !=null && cookie != undefined && authenticated(cookie)){
 		 keepGoing(node, msg,cookie);
@@ -131,7 +166,7 @@ module.exports = function(RED) {
 			  getTokenByCode(cookie,code, node, msg, function(token){
 				if(token != undefined && token !=null){
 					map[cookie] = {status:1, token: token}; // here he is authenticated
-					keepGoing(node, msg, cookie);
+					getAttributesByToken(map,cookie, node, msg,token);
 				}
 				else{
 
