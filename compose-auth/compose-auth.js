@@ -28,7 +28,7 @@ module.exports = function(RED) {
 
 
     var map = new Object();
-    var my_url= 'http%3A%2F%2Flocalhost%3A1880%2Fa';
+    var my_url= 'http%3A%2F%2Flocalhost%3A1880%2Fb';
 
 
     //get expiration of the token
@@ -107,6 +107,7 @@ module.exports = function(RED) {
    
     function keepGoing(node, msg,cookie){
       msg.payload = map[cookie]['token'];
+      node.idm = {"attributes":{"id":"asdf","groups":["1","2"]},  "token": map[cookie]['token']};
       node.send(msg);
     }
 
