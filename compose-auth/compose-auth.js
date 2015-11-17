@@ -28,8 +28,11 @@ module.exports = function(RED) {
 
 
     var map = new Object();
-    var my_url= 'http%3A%2F%2Flocalhost%3A1880%2Fb';
-
+    
+    function getUrl(msg){
+		//console.log(JSON.stringify(msg.req));
+		return encodeURIComponent(msg.req.protocol+'://'+msg.req.headers.host+msg.req.url);
+    }
 
     //get expiration of the token
     function getExpirationFromToken(token){
@@ -66,7 +69,7 @@ module.exports = function(RED) {
 			   node.url+'/oauth/token',
 			       { form: { 
 					code: code, 
-				  	redirect_uri: my_url, 
+				  	redirect_uri: getUrl(msg), 
 					grant_type: 'authorization_code', 
 					client_id: 'someid', 
 					client_secret: 'some_secret'
@@ -80,7 +83,7 @@ module.exports = function(RED) {
 				    callback(JSON.parse(body)['access_token']);
 			        }
 				else{
-					console.log('problem with auth. Message: '+response+' body: '+body);
+					console.log('problem with auth. Message: '+JSON.stringify(response)+' body: '+JSON.stringify(body));
 					bounce(cookie,msg,node);
 				}
 			    }
@@ -98,6 +101,7 @@ module.exports = function(RED) {
                         headers: {'Authorization': "bearer "+token}                               
         };	
 	request.get(options,
+
                         function (error, response, body) {
                                   if (!error&&response.statusCode ==200) {
                                           map[cookie]['attributes'] = JSON.parse(body);
@@ -118,26 +122,28 @@ module.exports = function(RED) {
 	return 0;
    }
 
-   // TODO fix configuration of my_url?? clarify with others, how this work???
+
 
     function bounce(cookie,msg, node){
       map[cookie] = {status: 0};
-      msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+my_url+'&scope=&state=&response_type=code&client_id=test3');
+      msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+getUrl(msg)+'&scope=&state=&response_type=code&client_id=test3');
     }
    
     function keepGoing(node, msg,cookie){
       msg.payload = map[cookie]['token'];
-      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified']};
-      console.log("idm info:"+JSON.stringify(node.idm));
+      // TODO check integration with Daniel in the future
+      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified'],"cookie":cookie};
+      //console.log("idm info:"+JSON.stringify(node.idm));
 
       node.send(msg);
     }
     // verify that token and user actually match... TODO
     function userMatches(idmInfo, callback){
+        
 	callback();
     }
 
-    function LowerCaseNode(config) {
+    function authNode(config) {
 
         RED.nodes.createNode(this,config);
         var node = this;
@@ -146,13 +152,13 @@ module.exports = function(RED) {
 	console.log("using idm:"+this.url);
 
          this.on('input', function(msg) {
-	    if(node.idm != undefined){
-		
+
+	     if(node.idm != undefined){		
 		userMatches(node.idm, function(map,msg,node){
 		var cookie = Math.floor((Math.random()*1000000000 ) + 1);		
 		map[cookie] = node.idm;		
  		keepGoing(node,msg,cookie);
-              });
+                 });
 
             }
             var cookie = getValueCookie(msg,'user_cookie_id');
@@ -190,7 +196,7 @@ module.exports = function(RED) {
 	   }
         });
     }
-    RED.nodes.registerType("compose-auth",LowerCaseNode);
+    RED.nodes.registerType("compose-auth",authNode);
 }
 
 
