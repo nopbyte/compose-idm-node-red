@@ -223,7 +223,7 @@ module.exports = function(RED) {
 		token = token.replace("bearer","");
 		token = token.replace("Bearer","");
 		token = token.trim();
-		console.log('trimmed token value: '+token);
+		//console.log('trimmed token value: '+token);
 		if(!isExpired(token) && tokenMap[token] != undefined && tokenMap[token] != null){
 			 //console.log('token found previously');
 			 keepGoingToken(node,msg,token);		
