@@ -28,5 +28,5 @@
 </script>
 
 <script type="text/x-red" data-help-name="compose-auth">
-    <p>A simple node that extracts the token from the authorization header and puts the attributes of the user in <code>msg.user_attributes</code></p>
+    <p>A simple node that extracts the token from the authorization header and puts the token in <code>msg.payload.token</code> and authenticates the user with the underlying framework</p>
 </script>

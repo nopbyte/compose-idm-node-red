@@ -26,29 +26,60 @@ module.exports = function(RED) {
     var request = require('request');
     var url = require('url');
 
+    var tokenMap = new Object();
+
 
     var map = new Object();
     
     function getUrl(msg){
-		//console.log(JSON.stringify(msg.req));
+		////console.log(JSON.stringify(msg.req));
 		return encodeURIComponent(msg.req.protocol+'://'+msg.req.headers.host+msg.req.url);
     }
 
-    //get expiration of the token
-    function getExpirationFromToken(token){
-   	var split = token.split(".");
-	for(var i=0; i< split.length; i++){
-        	var buf = new Buffer(split[i], 'base64');
-	        var object = JSON.parse(buf.toString());
-        	if(object.exp != null && object.exp != undefined){
-                     return object.exp;
-	        }
-    	}
+    function isExpired(token){
+        if (token == undefined){
+                return true;    
+        }
+	else if(token == 'anonymousToken'){
+		return false;
+	}
+        var time = parseInt((new Date).getTime())/1000;
+        var tokentimeObj = getExpirationFromToken(token);
+	if(tokentimeObj != null && tokentimeObj != undefined){
+        	var tokentime = parseInt(tokentimeObj);
+	        var diff = (tokentime + 350) - time; //difference minus 5 minutes...in case there is some difference
+	        //console.log('current time:'+time);
+	        //console.log('expiration time:'+tokentime);
+	        //console.log('difference :'+diff);
+                return diff<0;
+	}
+	else{
+		//console.log("can not find token time");
+		return true;
+	}
     }
+
+
+
+    function getExpirationFromToken(token){
+       try{
+	 var split = token.split(".");
+         for(var i=0; i< split.length; i++){
+                var buf = new Buffer(split[i], 'base64');
+                var object = JSON.parse(buf.toString());
+                if(object.exp != null && object.exp != undefined){
+                     return object.exp;
+                }
+         }
+	}catch(error){
+		//console.log("error decoding token...");
+	}
+	return undefined;
+    }
+
 
     //improve this...
     function getValueCookie(msg,label){
-        console.log('second stuff:'+msg);
 	var str = msg.req.get('Cookie');
 	if(str != undefined && str != null){
 	  var res = str.split(";");
@@ -83,7 +114,7 @@ module.exports = function(RED) {
 				    callback(JSON.parse(body)['access_token']);
 			        }
 				else{
-					console.log('problem with auth. Message: '+JSON.stringify(response)+' body: '+JSON.stringify(body));
+					//console.log('problem with auth. Message: '+JSON.stringify(response)+' body: '+JSON.stringify(body));
 					bounce(cookie,msg,node);
 				}
 			    }
@@ -95,7 +126,8 @@ module.exports = function(RED) {
 		
    }
 
-   function  getAttributesByToken(map,cookie, node, msg,token){
+   function  getAttributesByToken(cookie, node, msg,token){
+	//console.log('atts by token');
 	var options = {
                         url: node.url+'/idm/user/info/',
                         headers: {'Authorization': "bearer "+token}                               
@@ -104,9 +136,18 @@ module.exports = function(RED) {
 
                         function (error, response, body) {
                                   if (!error&&response.statusCode ==200) {
+					//console.log("satus code with attributes OK");
+					if(cookie != undefined && cookie != null){
+					  //console.log(" cookie is there ");
                                           map[cookie]['attributes'] = JSON.parse(body);
-                                          //map[cookie]['timestamp'] = body['lastModified'];
                                           keepGoing(node, msg, cookie);
+					}
+					else{
+					  //console.log("no cookie?");
+                                          tokenMap[token] = new Object();
+					  tokenMap[token]['attributes'] = JSON.parse(body);
+                                          keepGoingToken(node, msg, token);
+					}
                                   }
                                   else{
                                         bounce(cookie,msg,node);
@@ -123,20 +164,36 @@ module.exports = function(RED) {
    }
 
 
+    function sendErrorback(msg,errorDescription){
+		 msg.res.status(403)
+                  msg.res.send({error:errorDescription});
+
+    }
 
     function bounce(cookie,msg, node){
       map[cookie] = {status: 0};
       msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+getUrl(msg)+'&scope=&state=&response_type=code&client_id=test3');
     }
-   
-    function keepGoing(node, msg,cookie){
-      msg.payload = map[cookie]['token'];
-      // TODO check integration with Daniel in the future
-      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified'],"cookie":cookie};
-      //console.log("idm info:"+JSON.stringify(node.idm));
+
+    function keepGoingToken(node, msg,token){
+	//console.log('kgtoken');
+      msg.payload.token = token;
+      node.idm = {"attributes":tokenMap[token]['attributes'],  "token": token,"timestamp":tokenMap[token]['attributes']['lastModified']};
+      ////console.log("idm info:"+JSON.stringify(node.idm));
 
       node.send(msg);
     }
+   
+   
+    function keepGoing(node, msg,cookie){
+      msg.payload.token = map[cookie]['token'];
+      // TODO check integration with Daniel in the future
+      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified'],"cookie":cookie};
+      ////console.log("idm info:"+JSON.stringify(node.idm));
+
+      node.send(msg);
+    }
+
     // verify that token and user actually match... TODO
     function userMatches(idmInfo, callback){
         
@@ -144,25 +201,43 @@ module.exports = function(RED) {
     }
 
     function authNode(config) {
-
-        RED.nodes.createNode(this,config);
         var node = this;
-	console.log("config: "+JSON.stringify(config));
+        RED.nodes.createNode(this,config);
+	//console.log("config: "+JSON.stringify(config));
 	this.url = config.url;
-	console.log("using idm:"+this.url);
-
+	//console.log("using idm:"+this.url);
+	
          this.on('input', function(msg) {
-
-	     if(node.idm != undefined){		
-		userMatches(node.idm, function(map,msg,node){
-		var cookie = Math.floor((Math.random()*1000000000 ) + 1);		
-		map[cookie] = node.idm;		
- 		keepGoing(node,msg,cookie);
+	     /*if(node.idm != undefined){		
+	     	userMatches(node.idm, function(map,msg,node){
+  	     	var cookie = Math.floor((Math.random()*1000000000 ) + 1);		
+      	       map[cookie] = node.idm;		
+ 	     	keepGoing(node,msg,cookie);
                  });
+              }*/
 
-            }
+
             var cookie = getValueCookie(msg,'user_cookie_id');
-	    if(cookie !=null && cookie != undefined && authenticated(cookie)){
+	    if(msg.req.headers.authorization != undefined && msg.req.headers.authorization != null){
+		var token = msg.req.headers.authorization;
+		token = token.replace("bearer","");
+		token = token.replace("Bearer","");
+		token = token.trim();
+		console.log('trimmed token value: '+token);
+		if(!isExpired(token) && tokenMap[token] != undefined && tokenMap[token] != null){
+			 //console.log('token found previously');
+			 keepGoingToken(node,msg,token);		
+		}
+		else if(isExpired(token)){
+   			sendErrorback(msg,'either your token expired, or it has the wrong format');
+		}
+		else{
+			//console.log('token is not  in cahce');
+			//console.log("auth header received: "+token);
+			getAttributesByToken(null, node, msg,token);
+		}
+	    }
+	    else if(cookie !=null && cookie != undefined && authenticated(cookie)){
 		 keepGoing(node, msg,cookie);
 	    }
 	    else if(cookie != null && cookie != undefined){
@@ -172,13 +247,13 @@ module.exports = function(RED) {
 			  getTokenByCode(cookie,code, node, msg, function(token){
 				if(token != undefined && token !=null){
 					map[cookie] = {status:1, token: token}; // here he is authenticated
-					getAttributesByToken(map,cookie, node, msg,token);
+					getAttributesByToken(cookie, node, msg,token);
 				}
 				else{
 
 					bounce(cookie,msg,node);
 				}
-		        	console.log('code'+msg.req.query.code);
+		        	//console.log('code'+msg.req.query.code);
 		   	 });
             	}else{
 			//has a cookie, but he doesn't bring a code?? send it back!
@@ -187,12 +262,10 @@ module.exports = function(RED) {
 	    }else{
 	 	// no cookie, so set one and send him to IDM   
 		var cookie = Math.floor((Math.random()*1000000000 ) + 1);
-		console.log('map with'+JSON.stringify(map));
+		//console.log('map with'+JSON.stringify(map));
 		msg.res.setHeader( 'Set-Cookie', 'user_cookie_id='+cookie );
 		bounce(cookie,msg,node);
 
-	        //msg.res.send('hi');
-                //node.send(msg);
 	   }
         });
     }
