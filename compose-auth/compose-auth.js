@@ -176,10 +176,10 @@ module.exports = function(RED) {
     }
 
     function keepGoingToken(node, msg,token){
-	//console.log('kgtoken');
       msg.payload.token = token;
-      node.idm = {"attributes":tokenMap[token]['attributes'],  "token": token,"timestamp":tokenMap[token]['attributes']['lastModified']};
-      ////console.log("idm info:"+JSON.stringify(node.idm));
+      node.userInfo = tokenMap[token]['attributes'];
+      node.userInfo["token"]= token;
+      node.userInfo["timestamp"] = tokenMap[token]['attributes']['lastModified'];
 
       node.send(msg);
     }
@@ -187,9 +187,10 @@ module.exports = function(RED) {
    
     function keepGoing(node, msg,cookie){
       msg.payload.token = map[cookie]['token'];
-      // TODO check integration with Daniel in the future
-      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified'],"cookie":cookie};
-      ////console.log("idm info:"+JSON.stringify(node.idm));
+      node.userInfo = map[cookie]['attributes'];
+      node.userInfo ["token"] =  map[cookie]['token'];
+      node.userInfo["timestamp"] = map[cookie]['attributes']['lastModified'];
+      node["cookie"] =cookie;
 
       node.send(msg);
     }
