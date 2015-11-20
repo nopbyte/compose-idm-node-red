@@ -33,7 +33,7 @@ module.exports = function(RED) {
     
     function getUrl(msg){
 		////console.log(JSON.stringify(msg.req));
-		return encodeURIComponent(msg.req.protocol+'://'+msg.req.headers.host+"/api"+msg.req.url);
+		return encodeURIComponent(msg.req.protocol+'://'+msg.req.headers.host+msg.req.url);
     }
 
     function isExpired(token){
@@ -176,10 +176,10 @@ module.exports = function(RED) {
     }
 
     function keepGoingToken(node, msg,token){
+	//console.log('kgtoken');
       msg.payload.token = token;
-      node.userInfo = tokenMap[token]['attributes'];
-      node.userInfo["token"]= token;
-      node.userInfo["timestamp"] = tokenMap[token]['attributes']['lastModified'];
+      node.idm = {"attributes":tokenMap[token]['attributes'],  "token": token,"timestamp":tokenMap[token]['attributes']['lastModified']};
+      ////console.log("idm info:"+JSON.stringify(node.idm));
 
       node.send(msg);
     }
@@ -187,10 +187,9 @@ module.exports = function(RED) {
    
     function keepGoing(node, msg,cookie){
       msg.payload.token = map[cookie]['token'];
-      node.userInfo = map[cookie]['attributes'];
-      node.userInfo ["token"] =  map[cookie]['token'];
-      node.userInfo["timestamp"] = map[cookie]['attributes']['lastModified'];
-      node["cookie"] =cookie;
+      // TODO check integration with Daniel in the future
+      node.idm = {"attributes":map[cookie]['attributes'],  "token": map[cookie]['token'],"timestamp":map[cookie]['attributes']['lastModified'],"cookie":cookie};
+      ////console.log("idm info:"+JSON.stringify(node.idm));
 
       node.send(msg);
     }
@@ -224,7 +223,7 @@ module.exports = function(RED) {
 		token = token.replace("bearer","");
 		token = token.replace("Bearer","");
 		token = token.trim();
-		//console.log('trimmed token value: '+token);
+		console.log('trimmed token value: '+token);
 		if(!isExpired(token) && tokenMap[token] != undefined && tokenMap[token] != null){
 			 //console.log('token found previously');
 			 keepGoingToken(node,msg,token);		
