@@ -10,9 +10,6 @@ TOKEN=....
 curl -H "Authorization: Bearer $TOKEN"   -H "Content-Type: application/json;charset=UTF-8" -X GET http://localhost:1880/a
 */
 
-
-module.exports = function(RED) {
-    "use strict";
     var http = require("follow-redirects").http;
     var https = require("follow-redirects").https;
     var urllib = require("url");
@@ -26,13 +23,16 @@ module.exports = function(RED) {
     var request = require('request');
     var url = require('url');
 
+
+module.exports = function(RED) {
+    "use strict";
+
     var tokenMap = new Object();
 
 
     var map = new Object();
     
     function getUrl(msg){
-		////console.log(JSON.stringify(msg.req));
 		return encodeURIComponent(msg.req.protocol+'://'+msg.req.headers.host+"/api"+msg.req.url);
     }
 
@@ -80,8 +80,9 @@ module.exports = function(RED) {
 
     //improve this...
     function getValueCookie(msg,label){
-	var str = msg.req.get('Cookie');
-	if(str != undefined && str != null){
+      if(msg.req){
+	 var str = msg.req.get('Cookie');
+	 if(str != undefined && str != null){
 	  var res = str.split(";");
           for(var i =0; i<res.length; i++){
 		var cookies2 = res[i].split('=');
@@ -91,7 +92,9 @@ module.exports = function(RED) {
 			}
 		}
 	  }
-	}
+	 }
+      }
+      return null;
     }
   
    function getTokenByCode(cookie,code, node, msg, callback){
@@ -172,10 +175,16 @@ module.exports = function(RED) {
 
     function bounce(cookie,msg, node){
       map[cookie] = {status: 0};
-      msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+getUrl(msg)+'&scope=&state=&response_type=code&client_id=test3');
+      if(msg.res){
+         msg.res.redirect(node.url+'/oauth/authorize?redirect_uri='+getUrl(msg)+'&scope=&state=&response_type=code&client_id=test3');
+      }
     }
 
     function keepGoingToken(node, msg,token){
+      if(typeof(msg.payload)  != 'object' || msg.payload == null){
+            var old = msg.payload;
+            msg.payload = {'oldpayload':old};       
+      } 
       msg.payload.token = token;
       node.userInfo = tokenMap[token]['attributes'];
       node.userInfo["token"]= token;
@@ -219,22 +228,29 @@ module.exports = function(RED) {
 
 
             var cookie = getValueCookie(msg,'user_cookie_id');
-	    if(msg.req.headers.authorization != undefined && msg.req.headers.authorization != null){
-		var token = msg.req.headers.authorization;
+	    if(msg.token || (msg.req && (msg.req.headers.authorization))){	
+	       var token = "";
+          	if(msg.token){
+                 	token = msg.token;
+          	}
+		else  if(msg.req.headers.authorization != undefined && msg.req.headers.authorization != null){
+			token = msg.req.headers.authorization;	
+		}
 		token = token.replace("bearer","");
-		token = token.replace("Bearer","");
-		token = token.trim();
-		//console.log('trimmed token value: '+token);
+                token = token.replace("Bearer","");
+                token = token.trim();
+                console.log('trimmed token value: '+token);
+
 		if(!isExpired(token) && tokenMap[token] != undefined && tokenMap[token] != null){
-			 //console.log('token found previously');
+			 console.log('token found previously');
 			 keepGoingToken(node,msg,token);		
 		}
 		else if(isExpired(token)){
    			sendErrorback(msg,'either your token expired, or it has the wrong format');
 		}
 		else{
-			//console.log('token is not  in cahce');
-			//console.log("auth header received: "+token);
+			console.log('token is not  in cache...');
+			console.log("auth header received: "+token);
 			getAttributesByToken(null, node, msg,token);
 		}
 	    }
@@ -264,7 +280,9 @@ module.exports = function(RED) {
 	 	// no cookie, so set one and send him to IDM   
 		var cookie = Math.floor((Math.random()*1000000000 ) + 1);
 		//console.log('map with'+JSON.stringify(map));
-		msg.res.setHeader( 'Set-Cookie', 'user_cookie_id='+cookie );
+		if(msg.res){
+			msg.res.setHeader( 'Set-Cookie', 'user_cookie_id='+cookie );
+		}
 		bounce(cookie,msg,node);
 
 	   }
